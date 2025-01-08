@@ -5,14 +5,16 @@ namespace Omalizadeh\MultiPayment\Drivers\Saman;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Omalizadeh\MultiPayment\Drivers\Contracts\Driver;
+use Omalizadeh\MultiPayment\Drivers\Contracts\RefundInterface;
 use Omalizadeh\MultiPayment\Exceptions\InvalidConfigurationException;
 use Omalizadeh\MultiPayment\Exceptions\PaymentFailedException;
 use Omalizadeh\MultiPayment\Exceptions\PurchaseFailedException;
+use Omalizadeh\MultiPayment\Exceptions\RefundFailedException;
 use Omalizadeh\MultiPayment\Receipt;
 use Omalizadeh\MultiPayment\RedirectionForm;
 use SoapClient;
 
-class Saman extends Driver
+class Saman extends Driver implements RefundInterface
 {
     public function purchase(): string
     {
@@ -138,6 +140,11 @@ class Saman extends Driver
         return 2;
     }
 
+    protected function getSuccessfulRefundStatusCode(): int
+    {
+        return 0;
+    }
+
     protected function getPurchaseUrl(): string
     {
         return 'https://sep.shaparak.ir/MobilePG/MobilePayment';
@@ -151,6 +158,11 @@ class Saman extends Driver
     protected function getVerificationUrl(): string
     {
         return 'https://verify.sep.ir/Payments/ReferencePayment.asmx?WSDL';
+    }
+
+    protected function getRefundUrl(): string
+    {
+        return 'https://sep.shaparak.ir/verifyTxnRandomSessionkey/ipg/VerifyTransaction';
     }
 
     private function getCallbackMethod()
@@ -190,5 +202,23 @@ class Saman extends Driver
         }
 
         return $phoneNumber;
+    }
+
+    public function refund(): array
+    {
+        $refundData = $this->getVerificationData();
+
+        $response = Http::withHeaders($this->getRequestHeaders())
+            ->post($this->getRefundUrl(), $refundData);
+
+        if ($response->successful()) {
+            if (!$response['Success'] || (int) $response['ResultCode'] !== $this->getSuccessfulRefundStatusCode()) {
+                throw new RefundFailedException($response['ResultDescription'], $response['ResultCode']);
+            }
+
+            return $response['TransactionDetail'];
+        }
+
+        throw new RefundFailedException($response->body(), $response->status());
     }
 }
